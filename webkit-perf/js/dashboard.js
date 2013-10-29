@@ -197,10 +197,7 @@
         DEFAULT_BRANCH = dashboardManifest['defaultBranch'];
         $.each(platformToId, function(name, id) {
             DEFAULT_PLATFORM.push(name); });
-        $.each(testToId, function(name, id) {
-            if (DEFAULT_TEST.length < 1)
-                DEFAULT_TEST.push('Parser/html5-full-render');
-        });
+        $.each(testToId, function(name, id) { DEFAULT_TEST.push(name); });
 
         var args = getUrlVars();
         displayDays = args['displayrange'] ?

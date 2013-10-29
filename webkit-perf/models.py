@@ -38,6 +38,7 @@ from google.appengine.ext import db
 from google.appengine.api import memcache
 from time import mktime
 
+import logging
 
 class NumericIdHolder(db.Model):
     owner = db.ReferenceProperty()
@@ -202,7 +203,6 @@ class TestResult(db.Model):
     valueStdev = db.FloatProperty()
     valueMin = db.FloatProperty()
     valueMax = db.FloatProperty()
-    values = db.ListProperty(float)
 
     @staticmethod
     def key_name(build, test_name):
@@ -221,14 +221,9 @@ class TestResult(db.Model):
         if not isinstance(result, dict):
             return cls.get_or_insert(key_name, name=test_name, build=build, value=float(result))
 
-        # Skip malformed entries.
-        if 'avg' not in result:
-            return None
-
         return cls.get_or_insert(key_name, name=test_name, build=build, value=float(result['avg']),
             valueMedian=_float_or_none(result, 'median'), valueStdev=_float_or_none(result, 'stdev'),
-            valueMin=_float_or_none(result, 'min'), valueMax=_float_or_none(result, 'max'),
-            values=result.get('values', []))
+            valueMin=_float_or_none(result, 'min'), valueMax=_float_or_none(result, 'max'))
 
     def replace_to_change_test_name(self, new_name):
         clone = TestResult(key_name=TestResult.key_name(self.build, new_name), name=new_name, build=self.build,
@@ -253,12 +248,9 @@ class ReportLog(db.Model):
         return self._parsed
 
     def get_value(self, keyName):
-        parsed = self._parsed_payload()
-        if not parsed:
+        if not self._parsed_payload():
             return None
-        if isinstance(parsed, list):
-            parsed = parsed[0]
-        return parsed.get(keyName)
+        return self._parsed.get(keyName)
 
     def results(self):
         return self.get_value('results')
@@ -274,22 +266,13 @@ class ReportLog(db.Model):
             except ValueError:
                 return False
 
-        if isinstance(self._parsed_payload(), list) and len(self._parsed_payload()) != 1:
-            return False
-
         if not isinstance(self.results(), dict):
             return False
 
         for testResult in self.results().values():
             if isinstance(testResult, dict):
                 for key, value in testResult.iteritems():
-                    if key == "values":
-                        if not isinstance(value, list):
-                            return False
-                        for item in value:
-                            if not _is_float_convertible(item):
-                                return False
-                    elif key != "unit" and not _is_float_convertible(value):
+                    if key != "unit" and not _is_float_convertible(value):
                         return False
                 if 'avg' not in testResult:
                     return False
@@ -366,7 +349,6 @@ class Runs(db.Model):
     platform = db.ReferenceProperty(Platform, required=True, collection_name='runs_platform')
     test = db.ReferenceProperty(Test, required=True, collection_name='runs_test')
     json_runs = db.TextProperty()
-    json_runs2 = db.TextProperty()
     json_averages = db.TextProperty()
     json_min = db.FloatProperty()
     json_max = db.FloatProperty()
@@ -374,13 +356,10 @@ class Runs(db.Model):
     @staticmethod
     def _generate_runs(branch, platform, test_name):
         builds = Build.all()
-        builds.filter('timestamp > ', datetime(2012, 12, 22))
-#        builds.filter('branch =', branch)
-#        builds.filter('platform =', platform)
+        builds.filter('branch =', branch)
+        builds.filter('platform =', platform)
 
         for build in builds:
-            if Build.branch.get_value_for_datastore(build) != branch.key() or Build.platform.get_value_for_datastore(build) != platform.key():
-                continue
             results = TestResult.all()
             results.filter('name =', test_name)
             results.filter('build =', build)
@@ -396,7 +375,7 @@ class Runs(db.Model):
         supplementary_revisions = None
 
         if result.valueStdev != None and result.valueMin != None and result.valueMax != None:
-            statistics = {'stdev': result.valueStdev, 'min': result.valueMin, 'max': result.valueMax, 'values': result.values}
+            statistics = {'stdev': result.valueStdev, 'min': result.valueMin, 'max': result.valueMax}
 
         if build.chromiumRevision != None:
             supplementary_revisions = {'Chromium': build.chromiumRevision}
@@ -430,26 +409,21 @@ class Runs(db.Model):
     def update_incrementally(self, build, result, check_duplicates_and_save=True):
         new_entry = Runs._entry_from_build_and_result(build, result)
 
-        # Save space
-        self.json_averages = None
-        self.json_runs = self.json_runs.replace(', ', ',')
-
-        additional_json_runs_string = json.dumps(new_entry)
-        if self.json_runs:
-            additional_json_runs_string = ',' + additional_json_runs_string.replace(', ', ',')
-
         # Check for duplicate entries
-        if additional_json_runs_string in self.full_json_runs():
-            return
+        if check_duplicates_and_save:
+            revision_is_in_runs = str(build.revision) in json.loads('{' + self.json_averages + '}')
+            if revision_is_in_runs and new_entry[1] in [entry[1] for entry in json.loads('[' + self.json_runs + ']')]:
+                return
 
-        if len(self.json_runs) + len(additional_json_runs_string) >= 1000000:
-            if not self.json_runs2:
-                self.json_runs2 = ''
-            self.json_runs2 += additional_json_runs_string
-        else:
-            self.json_runs += additional_json_runs_string
+        if self.json_runs:
+            self.json_runs += ','
 
+        if self.json_averages:
+            self.json_averages += ','
+
+        self.json_runs += json.dumps(new_entry)
         # FIXME: Calculate the average. In practice, we wouldn't have more than one value for a given revision.
+        self.json_averages += '"%d": %f' % (build.revision, result.value)
         self.json_min = min(self.json_min, result.value) if self.json_min != None else result.value
         self.json_max = max(self.json_max, result.value)
 
@@ -473,33 +447,30 @@ class Runs(db.Model):
             memcache.set(key_name, runs_json)
         return runs_json
 
-    def full_json_runs(self):
-        return self.json_runs + (self.json_runs2 if self.json_runs2 else '')
-
     def to_json(self):
         # date_range is never used by common.js.
-        return '{"test_runs": [%s], "averages": {}, "min": %s, "max": %s, "unit": %s, "date_range": null, "stat": "ok"}' % (self.full_json_runs(),
-            str(self.json_min) if self.json_min else 'null', str(self.json_max) if self.json_max else 'null',
+        return '{"test_runs": [%s], "averages": {%s}, "min": %s, "max": %s, "unit": %s, "date_range": null, "stat": "ok"}' % (self.json_runs,
+            self.json_averages, str(self.json_min) if self.json_min else 'null', str(self.json_max) if self.json_max else 'null',
             '"%s"' % self.test.unit if self.test.unit else 'null')
 
-    def chart_params(self, display_days):
+    def chart_params(self, display_days, now=datetime.utcnow().replace(hour=12, minute=0, second=0, microsecond=0)):
         chart_data_x = []
         chart_data_y = []
-        timestamp_from_entry = lambda entry: Runs._timestamp_and_value_from_json_entry(entry)[0]
-        runs = sorted(json.loads('[' + self.full_json_runs() + ']'), lambda a, b: int(timestamp_from_entry(a) - timestamp_from_entry(b)))
-        if not runs:
-            return None
+        end_time = now
+        start_timestamp = mktime((end_time - timedelta(display_days)).timetuple())
+        end_timestamp = mktime(end_time.timetuple())
 
-        end_timestamp = timestamp_from_entry(runs[-1])
-        start_timestamp = end_timestamp - display_days * 24 * 3600
-        for entry in runs:
+        for entry in json.loads('[' + self.json_runs + ']'):
             timestamp, value = Runs._timestamp_and_value_from_json_entry(entry)
             if timestamp < start_timestamp or timestamp > end_timestamp:
                 continue
             chart_data_x.append(timestamp)
             chart_data_y.append(value)
 
-        dates = [datetime.fromtimestamp(end_timestamp) - timedelta(display_days / 7.0 * (7 - i)) for i in range(0, 8)]
+        if not chart_data_y:
+            return None
+
+        dates = [end_time - timedelta(display_days / 7.0 * (7 - i)) for i in range(0, 8)]
 
         y_max = max(chart_data_y) * 1.1
         y_axis_label_step = int(y_max / 5 + 0.5)  # This won't work for decimal numbers
@@ -538,7 +509,7 @@ class DashboardImage(db.Model):
         image = memcache.get('dashboard-image:' + key_name)
         if not image:
             instance = DashboardImage.get_by_key_name(key_name)
-            image = instance.image if instance else None
+            image = instance.image
             memcache.set('dashboard-image:' + key_name, image)
         return image
 

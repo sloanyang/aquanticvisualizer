@@ -346,9 +346,6 @@
         });
         $.getJSON(SERVER + '/api/test/runs', {id: testid, branchid: branchid,
                                      platformid: platformid}, function(data) {
-            data.test_runs.sort(function (a, b) {
-                return a[2] - b[2];
-            });
             try {
                 var testName = manifest.testMap[testid].name;
                 var branchName = manifest.branchMap[branchid].name;
@@ -524,32 +521,23 @@
     });
 
     function buildMenu(data) {
-        function nameIndexMap(map) {
-            var newMap = {};
-            for (var index in map)
-                newMap[map[index].name] = index;
-            return sortProperties(newMap);
-        }
-
-        var branchs = nameIndexMap(data.branchMap);
-        for (var name in branchs) {
+        for (var index in data.branchMap) {
+            var value = data.branchMap[index];
             $('#add-branches').append('<option name="' +
-                                      name + '" value="' +
-                                      branchs[name] + '">' + name + '</option>');
+                                      value.name + '" value="' +
+                                      index + '">' + value.name + '</option>');
         }
-
-        var tests = nameIndexMap(data.testMap);
-        for (var name in tests) {
-            $('#add-tests').append('<option id="' + name + '" value="' +
-                                   tests[name] + '" disabled>' + name +
+        for (var index in data.testMap) {
+            var value = data.testMap[index];
+            $('#add-tests').append('<option id="' + value.name + '" value="' +
+                                   index + '" disabled>' + value.name +
                                    '</option>');
         }
-
-        var platforms = nameIndexMap(data.platformMap);
-        for (var name in platforms) {
+        for (var index in data.platformMap) {
+            var value = data.platformMap[index];
             $('#add-platforms').append('<option value="' +
-                                       platforms[name] + '" disabled>' +
-                                       name + '</option>');
+                                       index + '" disabled>' +
+                                       value.name + '</option>');
         }
 
         return true;

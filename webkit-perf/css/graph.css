@@ -308,11 +308,8 @@ html {
 	margin: 20px 0;
 }
 #add-overlay fieldset div {
-	display: table-cell;
-	padding: 0;
-	margin: 0;
-	border: solid transparent;
-	border-width: 0 10px 0 10px;
+	display: inline-block;
+	margin-left: 20px;
 }
 #add-overlay fieldset div:first-child {
 	margin-left: 0;
@@ -357,23 +354,6 @@ html {
 }
 #add-overlay fieldset select:disabled optgroup {
 	opacity: .5;
-}
-#add-overlay .treeview {
-	display: block;
-	width: 18em;
-    height: 16em;
-	border: 1px solid #0b1f3b;
-    overflow: auto;
-}
-#add-overlay .treeview li ul {
-    margin-left: 1em;
-}
-#add-overlay .treeview .hidden {
-    display: none;
-}
-#add-overlay .treeview a {
-}
-#add-overlay .treeview a:hover {
 }
 #add-overlay footer {
 	display: block;

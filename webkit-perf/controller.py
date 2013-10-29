@@ -29,18 +29,15 @@
 
 import urllib
 import webapp2
-from datetime import datetime
 from google.appengine.api import taskqueue
 from google.appengine.ext import db
 
 from json_generators import DashboardJSONGenerator
 from json_generators import ManifestJSONGenerator
 from models import Branch
-from models import Build
 from models import DashboardImage
 from models import PersistentCache
 from models import Platform
-from models import ReportLog
 from models import Runs
 from models import Test
 from models import model_from_numeric_id
@@ -88,36 +85,13 @@ class CachedDashboardHandler(webapp2.RequestHandler):
             schedule_dashboard_update()
 
 
-def schedule_commit_all():
-    taskqueue.add(url='/admin/commit-all', params={'in-background': True}, target='model-manipulator')
-
-class CommitAllHandler(webapp2.RequestHandler):
-    def get(self):
-        self.response.headers['Content-Type'] = 'text/plain; charset=utf-8'
-        schedule_commit_all()
-        self.response.out.write('OK')
-
-    def post(self):
-        self.response.headers['Content-Type'] = 'text/plain; charset=utf-8'
-        logs = ReportLog.all()
-        limit = 50
-        count = 0
-        for log in logs.fetch(limit):
-            log.commit = True
-            log.put()
-            schedule_report_process(log)
-            count += 1
-        if count == limit:
-            schedule_commit_all()
-        self.response.out.write('OK')
-
-
 def schedule_runs_update(test_id, branch_id, platform_id, regenerate_runs=True):
     if regenerate_runs:
-        taskqueue.add(url='/api/test/runs/update', params={'id': test_id, 'branchid': branch_id, 'platformid': platform_id},
-            target='model-manipulator')
-#    taskqueue.add(url='/api/test/runs/chart', params={'id': test_id, 'branchid': branch_id, 'platformid': platform_id,
-#        'displayDays': 7})
+        taskqueue.add(url='/api/test/runs/update', params={'id': test_id, 'branchid': branch_id, 'platformid': platform_id})
+    for display_days in [7]:
+        if DashboardImage.needs_update(branch_id, platform_id, test_id, display_days):
+            taskqueue.add(url='/api/test/runs/chart', params={'id': test_id, 'branchid': branch_id, 'platformid': platform_id,
+                'displayDays': display_days})
 
 
 def _get_test_branch_platform_ids(handler):
@@ -161,7 +135,6 @@ class CachedRunsHandler(webapp2.RequestHandler):
 
 class RunsChartHandler(webapp2.RequestHandler):
     def post(self):
-        return
         self.response.headers['Content-Type'] = 'text/plain; charset=utf-8'
         test_id, branch_id, platform_id = _get_test_branch_platform_ids(self)
 
@@ -172,7 +145,8 @@ class RunsChartHandler(webapp2.RequestHandler):
         assert branch
         assert platform
         assert test
-        params = Runs.get_by_objects(branch, platform, test).chart_params(display_days)
+
+        params = Runs.update_or_insert(branch, platform, test).chart_params(display_days)
         if not params:
             return
         dashboard_chart_file = urllib.urlopen('http://chart.googleapis.com/chart', urllib.urlencode(params))

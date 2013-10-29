@@ -350,14 +350,6 @@ class TestResultTests(DataStoreTestsBase):
         self.assertEqual(result.valueStdev, 3.25)
         self.assertEqual(result.valueMin, 30.5)
         self.assertEqual(result.valueMax, 45)
-        self.assertEqual(result.values, [])
-
-    def test_get_or_insert_stat_value_with_values(self):
-        branch, platform, builder = _create_some_builder()
-        build = _create_build(branch, platform, builder)
-        result = TestResult.get_or_insert_from_parsed_json('some-test', build,
-            {"avg": 40, "median": "40.1", "stdev": 3.25, "min": 30.5, "max": 45, "values": [1.0, 2.0, 3.0]})
-        self.assertEqual(result.values, [1.0, 2.0, 3.0])
 
     def test_replace_to_change_test_name(self):
         branch, platform, builder = _create_some_builder()
@@ -459,12 +451,6 @@ class ReportLogTests(DataStoreTestsBase):
         assert_results_are_well_formed('{"results": {"test": {"avg": 456, "median": "hello"}}}', False)
         assert_results_are_well_formed('{"results": {"test": {"avg": 456, "median": 789}}}', True)
         assert_results_are_well_formed('{"results": {"test": {"avg": 456, "unit": "bytes"}}}', True)
-        assert_results_are_well_formed('{"results": {"test": {"avg": 456, "unit": "bytes", "values": [1.0, 2.0, 3.0]}}}', True)
-
-        assert_results_are_well_formed('[]', False)
-        assert_results_are_well_formed('[{"results": {"test": 123}}]', True)
-        assert_results_are_well_formed('[{"results": {"test": 123}}, {"results": {"test": 123}}]', False)
-        assert_results_are_well_formed('[{"results": {"test": {"avg": 456, "unit": "bytes", "values": [1.0, 2.0, 3.0]}}}]', True)
 
     def test_builder(self):
         log = self._create_log_with_payload('{"key": "value"}')
@@ -514,19 +500,12 @@ class ReportLogTests(DataStoreTestsBase):
         log = self._create_log_with_payload('{"webkit-revision": 123}')
         self.assertEqual(log.webkit_revision(), 123)
 
-    def test_chromium_revision(self):
+    def chromium_revision(self):
         log = self._create_log_with_payload('{"chromium-revision": 123}')
-        self.assertEqual(log.chromium_revision(), 123)
+        self.assertEqual(log.webkit_revision(), 123)
 
         log = self._create_log_with_payload('{"key": "value"}')
-        self.assertEqual(log.chromium_revision(), None)
-
-    def test_results_in_array(self):
-        platform = Platform.create_if_possible("some-platform", "Some Platform")
-        log = self._create_log_with_payload('[{"platform": "some-platform", "build-number": 123, "webkit-revision": 456}]')
-        self.assertEqual(log.platform().key(), platform.key())
-        self.assertEqual(log.build_number(), 123)
-        self.assertEqual(log.webkit_revision(), 456)
+        self.assertEqual(log.webkit_revision(), None)
 
 
 class PersistentCacheTests(DataStoreTestsBase):
@@ -618,7 +597,7 @@ class RunsTest(DataStoreTestsBase):
         builds, results = self._create_results(some_branch, some_platform, some_builder, 'some-test', [50.0])
         runs = Runs.update_or_insert(some_branch, some_platform, some_test)
         self.assertOnlyInstance(runs)
-        self.assertTrue(runs.json_runs.startswith('[5,[4,0,100,null],'))
+        self.assertTrue(runs.json_runs.startswith('[5, [4, 0, 100, null],'))
         self.assertEqual(json.loads('{' + runs.json_averages + '}'), {"100": 50.0})
         self.assertEqual(runs.json_min, 50.0)
         self.assertEqual(runs.json_max, 50.0)
@@ -801,7 +780,7 @@ class RunsTest(DataStoreTestsBase):
         def split_as_int(string):
             return [int(float(value)) for value in string.split(',')]
 
-        params = Runs.update_or_insert(some_branch, some_platform, some_test).chart_params(7)
+        params = Runs.update_or_insert(some_branch, some_platform, some_test).chart_params(7, end_time)
         self.assertEqual(params['chxl'], '0:|Feb 21|Feb 22|Feb 23|Feb 24|Feb 25|Feb 26|Feb 27|Feb 28')
         self.assertEqual(split_as_int(params['chxr']), [1, 0, 57, int(52 * 1.1 / 5 + 0.5)])
         x_min, x_max, y_min, y_max = split_as_int(params['chds'])
@@ -811,7 +790,7 @@ class RunsTest(DataStoreTestsBase):
         self.assertEqual(y_max, int(52 * 1.1))
         self.assertEqual(split_as_int(params['chg']), [int(100 / 7), 20, 0, 0])
 
-        params = Runs.update_or_insert(some_branch, some_platform, some_test).chart_params(14)
+        params = Runs.update_or_insert(some_branch, some_platform, some_test).chart_params(14, end_time)
         self.assertEqual(params['chxl'], '0:|Feb 14|Feb 16|Feb 18|Feb 20|Feb 22|Feb 24|Feb 26|Feb 28')
         self.assertEqual(split_as_int(params['chxr']), [1, 0, 57, int(52 * 1.1 / 5 + 0.5)])
         x_min, x_max, y_min, y_max = split_as_int(params['chds'])
